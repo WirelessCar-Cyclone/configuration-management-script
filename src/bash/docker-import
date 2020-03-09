@@ -15,11 +15,11 @@ function check_deps() {
 
 function parse_input() {
   read -r -a INPUT_ARRAY <<< "${SOURCE//\// }"
-  DOCKER_NAME= "${INPUT_ARRAY[-1]}"
+  DOCKER_NAME="${INPUT_ARRAY[-1]}"
 
   read -r -a INPUT_ARRAY <<< "${DOCKER_NAME//:/ }"
-  DOCKER_TAG= "${INPUT_ARRAY[-1]}"
-  DOCKER_NAME= "${INPUT_ARRAY[-2]}"
+  DOCKER_TAG="${INPUT_ARRAY[-1]}"
+  DOCKER_NAME="${INPUT_ARRAY[-2]}"
 
   [[ -n "${DOCKER_NAME}" ]] || error_exit "Unable to parse input docker name missing."
   [[ -n "${DOCKER_TAG}" ]] || error_exit "Unable to parse input docker tag missing."
