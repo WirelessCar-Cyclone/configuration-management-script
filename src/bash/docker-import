@@ -5,7 +5,7 @@ set -euox pipefail
 SOURCE="$1"
 
 function check_deps() {
-  test -f $(which az) || error_exit "Azure cli command not detected in path, please install it"
+  test -f "$(which az)" || error_exit "Azure cli command not detected in path, please install it"
   VALID=$(az account get-access-token --query "expiresOn" --output tsv)
   VALID_SEC=$(date --date "$VALID" +'%s')
   NOW_SEC=$(date +'%s')
@@ -14,12 +14,12 @@ function check_deps() {
 }
 
 function parse_input() {
-  INPUT_ARRAY=(${SOURCE//\// })
-  DOCKER_NAME=${INPUT_ARRAY[-1]}
+  read -r -a INPUT_ARRAY <<< "${SOURCE//\// }"
+  DOCKER_NAME= "${INPUT_ARRAY[-1]}"
 
-  INPUT_ARRAY=(${DOCKER_NAME//:/ })
-  DOCKER_TAG=${INPUT_ARRAY[-1]}
-  DOCKER_NAME=${INPUT_ARRAY[-2]}
+  read -r -a INPUT_ARRAY <<< "${DOCKER_NAME//:/ }"
+  DOCKER_TAG= "${INPUT_ARRAY[-1]}"
+  DOCKER_NAME= "${INPUT_ARRAY[-2]}"
 
   [[ -n "${DOCKER_NAME}" ]] || error_exit "Unable to parse input docker name missing."
   [[ -n "${DOCKER_TAG}" ]] || error_exit "Unable to parse input docker tag missing."
