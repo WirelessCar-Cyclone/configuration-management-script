@@ -50,6 +50,7 @@ setup-git: az-login
 
 Key_Vault_qa-westeurope := qa-weu-kv
 Key_Vault_qa-northeurope := qa-neu-kv
+Key_Vault_nonprod-francecentral := CycloneKeyVault
 
 ######## Download secrets from AKV  #######
 
