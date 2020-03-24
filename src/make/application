@@ -1,0 +1,141 @@
+empty:=
+ws:=$(empty) $(empty)
+colon:=$(empty):$(empty)
+
+ENVS += $(foreach ENV,$(patsubst resources/overlays/%-aks,%,$(wildcard resources/overlays/*)),$(ENV))
+CLUSTERS += $(foreach CLUSTER,$(patsubst resources/overlays/%,%,$(wildcard resources/overlays/*)),$(CLUSTER))
+TENANTS += $(foreach TENANT,$(patsubst resources/overlays/%,%,$(wildcard resources/overlays/*-aks/*)),$(TENANT))
+
+SPRING_BOOT_ALL_PROFILES += $(foreach PROFILE,$(patsubst src/main/resources/application-%.yml,%,$(wildcard src/main/resources/application-*.yml)),$(PROFILE))
+SPRING_BOOT_PROFILES := $(filter-out docker k8s local,$(SPRING_BOOT_ALL_PROFILES))
+
+####### Debug targets #######
+
+.PHONY: debug
+.SILENT: debug $(ENVS) $(TENANTS) $(SPRING_BOOT_PROFILES) $(CLUSTERS)
+debug: $(ENVS) $(TENANTS) $(SPRING_BOOT_PROFILES) $(CLUSTERS)
+
+$(ENVS):
+	echo ENV $@
+
+$(CLUSTERS):
+	echo CLUSTER $@
+
+$(TENANTS):
+	echo TENANT $@
+
+$(SPRING_BOOT_PROFILES):
+	echo PROFILE $@
+
+####### Auth Azure CLI #######
+
+.PHONY: az-login
+.SILENT: az-login
+az-login:
+	az login --service-principal -u $(SERVICE_PRINCIPAL_ID) -p $(SERVICE_PRINCIPAL_PASSWD) --tenant $(SERVICE_PRINCIPAL_TENANT)
+
+####### Remove all generated files #######
+
+.PHONY: clean
+clean:
+	rm -rf out
+
+####### Download and setup ssh key for git access #######
+
+.PHONY: setup-git
+setup-git: az-login
+	git-setup $(AKV_GITHUB_DEPLOY_KEY) $(GITHUB_SOURCE) $(AKV_SOURCE_KEY) $(GITHUB_TARGET) $(AKV_TARGET_KEY)
+
+####### Dict to lookup Key Vault name for aks #######
+
+Key_Vault_qa-westeurope := qa-weu-kv
+Key_Vault_qa-northeurope := qa-neu-kv
+
+######## Download secrets from AKV  #######
+
+AKV_DOWN_FILES += $(foreach PROFILE,$(SPRING_BOOT_PROFILES),$(DOCKER_BUILD_NAME)-$(PROFILE)-yml)
+AKV_DOWN_TENANTS += $(foreach AKV_DOWN_FILE,$(AKV_DOWN_FILES),$(addsuffix /$(AKV_DOWN_FILE),$(TENANTS)))
+AKV_DOWN += $(addprefix out/akv/,$(AKV_DOWN_TENANTS))
+AKV_DOWN += $(foreach ENV,$(ENVS),out/akv/$(ENV)-aks/sealed-secrets-$(ENV)-pub)
+akv-download: $(AKV_DOWN)
+$(AKV_DOWN): az-login
+	rm -f $@
+	mkdir -p $(dir $@)
+	$(eval CLUSTER := $(word 3, $(subst /, $(ws), $@)))
+	$(eval ENV := $(patsubst %-aks,%,$(CLUSTER)))
+	az keyvault secret download --file $@ --encoding base64 --vault-name $(Key_Vault_$(ENV)) --name $(notdir $@)
+
+####### Create K8s secret #######
+
+K8S_SECRET_FILES += $(foreach PROFILE,$(SPRING_BOOT_PROFILES),$(DOCKER_BUILD_NAME)-$(PROFILE).yml)
+K8S_SECRET_TENANTS += $(foreach K8S_SECRET_FILE,$(K8S_SECRET_FILES),$(addsuffix /$(K8S_SECRET_FILE),$(TENANTS)))
+K8S_SECRET += $(addprefix out/secret/,$(K8S_SECRET_TENANTS))
+generate-k8s: $(K8S_SECRET)
+$(K8S_SECRET): out/secret/%.yml : out/akv/%-yml
+	mkdir -p $(dir $@)
+	kubectl create secret generic $(patsubst %.yml,%,$(notdir $@)) --from-file=$(notdir $@)=$< --dry-run -o yaml > $@
+
+####### Kubeseal secrets #######
+
+SEALED_SECRET_FILES += $(foreach PROFILE,$(SPRING_BOOT_PROFILES),$(DOCKER_BUILD_NAME)-$(PROFILE).yml)
+SEALED_SECRET_TENANTS += $(foreach SEALED_SECRET_FILE,$(SEALED_SECRET_FILES),$(addsuffix /$(SEALED_SECRET_FILE),$(TENANTS)))
+SEALED_SECRET += $(addprefix out/overlays/,$(SEALED_SECRET_TENANTS))
+sealed-secrets: $(SEALED_SECRET)
+$(SEALED_SECRET): resources akv-download generate-k8s
+	rm -rf $@
+	mkdir -p $(dir $@)
+	$(eval NAMESPACE := $(word 4, $(subst /, $(ws), $@)))
+	$(eval CLUSTER := $(word 3, $(subst /, $(ws), $@)))
+	$(eval ENV := $(patsubst %-aks,%,$(CLUSTER)))
+	$(eval SECRET := out/secret/$(ENV)-aks/$(NAMESPACE)/$(notdir $@))
+	kubeseal --namespace $(NAMESPACE) --cert out/akv/$(ENV)-aks/sealed-secrets-$(ENV)-pub -o yaml < $(SECRET) > $@
+
+####### Copy resources for K8s manifest #######
+
+.PHONY: resources
+resources:
+	cp -TR resources/ out/
+
+####### Select docker image version #######
+
+update-docker-image-version: resources
+	sed -i "s/docker_build_tag/$(DOCKER_BUILD_TAG)/g" out/base/kustomization.yml
+	sed -i "s/docker_build_name/$(DOCKER_BUILD_NAME)/g" out/base/kustomization.yml
+
+####### Generate manifest for K8s #######
+
+KUSTOMIZE:=$(foreach TENANT,$(TENANTS),out/$(TENANT))
+.PHONY: $(KUSTOMIZE)
+kustomize: update-docker-image-version sealed-secrets $(KUSTOMIZE)
+$(KUSTOMIZE):
+	rm -rf $@/manifest*
+	mkdir -p $@
+	kubectl kustomize $(subst out/,out/overlays/,$@) | csplit - --prefix="$@/manifest" --suffix-format='%03d.yaml' --elide-empty-files --keep-files /---/ '{*}'
+
+####### Handle version increment #######
+
+.PHONY: major minor patch version
+
+version:
+	@if ! test -f version; then mkdir -p version; fi
+	@if ! test -f version/major; then echo 0 > version/major; fi
+	@if ! test -f version/minor; then echo 0 > version/minor; fi
+	@if ! test -f version/patch; then echo 0 > version/patch; fi
+
+major minor patch: version
+	@echo $$(($$(cat version/$@) + 1)) > version/$@
+
+####### Tag and upload to git #######
+
+.PHONY: publish
+publish: patch setup-git
+	rm -rf out/target/*-aks ||:
+	cp -rf out/*-aks out/target
+	git-publish
+
+####### Compile and print a list of available targets #######
+
+.PHONY: list
+
+list:
+	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
