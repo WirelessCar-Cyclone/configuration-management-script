@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euox pipefail
+
+TAG="$1"
+
+pushd out/source
+git commit -m "${TAG}" ||:
+git tag -a "${TAG}" -m "${TAG}" ||:
+popd
+
+pushd out/target
+git add . ||:
+git commit -m "${TAG}" ||:
+  git tag -a "${TAG}" -m "${TAG}" ||:
+  git push origin ||:
+  git push origin "${TAG}" ||:
+
+popd
+pushd out/source
+git push origin ||:
+git push origin "${TAG}" ||:
