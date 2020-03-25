@@ -113,26 +113,13 @@ $(KUSTOMIZE):
 	mkdir -p $@
 	kubectl kustomize $(subst out/,out/overlays/,$@) | csplit - --prefix="$@/manifest" --suffix-format='%03d.yaml' --elide-empty-files --keep-files /---/ '{*}'
 
-####### Handle version increment #######
-
-.PHONY: major minor patch version
-
-version:
-	@if ! test -f version; then mkdir -p version; fi
-	@if ! test -f version/major; then echo 0 > version/major; fi
-	@if ! test -f version/minor; then echo 0 > version/minor; fi
-	@if ! test -f version/patch; then echo 0 > version/patch; fi
-
-major minor patch: version
-	@echo $$(($$(cat version/$@) + 1)) > version/$@
-
 ####### Tag and upload to git #######
 
 .PHONY: publish
-publish: patch setup-git
+publish: setup-git
 	rm -rf out/target/*-aks ||:
 	cp -rf out/*-aks out/target
-	git-publish
+	git-tag $(DOCKER_BUILD_TAG)
 
 ####### Compile and print a list of available targets #######
 

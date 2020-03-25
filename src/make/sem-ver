@@ -1,0 +1,19 @@
+####### Handle version increment #######
+
+.PHONY: major minor patch version
+
+version:
+	@if ! test -f version; then mkdir -p version; fi
+	@if ! test -f version/major; then echo 0 > version/major; fi
+	@if ! test -f version/minor; then echo 0 > version/minor; fi
+	@if ! test -f version/patch; then echo 0 > version/patch; fi
+
+major minor patch: version
+	@echo $$(($$(cat version/$@) + 1)) > version/$@
+
+####### Compile and print a list of available targets #######
+
+.PHONY: list
+
+list:
+	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
