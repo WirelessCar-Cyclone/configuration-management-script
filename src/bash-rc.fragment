@@ -1,0 +1,22 @@
+PROMPT_COMMAND=prompter
+
+prompter(){
+ACCOUNT=$(az account show 2> /dev/null)
+SUB=$(echo $ACCOUNT | jq -r .id)
+NAME=$(echo $ACCOUNT | jq -r .name)
+
+case $SUB in
+
+  cc5948d2-1081-485e-a199-79140716058f)
+    export PS1="\[\e[41m\]$NAME\[\e[m\] >"
+    ;;
+
+  9c2d324b-47c7-4f19-ae87-16f0e8196b09)
+    export PS1="\[\e[42m\]$NAME\[\e[m\] >"
+    ;;
+
+  *)
+    export PS1="~> "
+    ;;
+esac
+}
